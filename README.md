@@ -2,7 +2,7 @@
 
 A macOS menu bar app that grabs your system audio and turns it into head-tracked binaural 3D sound over AirPods.
 
-This is a learning project first. Real-time DSP, Core Audio process taps, sensor fusion, binaural psychoacoustics — I'm hand-coding all of it instead of letting a model generate it.
+This is a learning project first. Real-time DSP, Core Audio process taps, sensor fusion, binaural psychoacoustics; I'm hand-coding all of it instead of letting a model generate it.
 
 ## Status
 
