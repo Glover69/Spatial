@@ -22,8 +22,11 @@ struct ContentView: View {
         Text("Hello, world!")
             .padding()
             .onAppear {
+                audio.player.position = AVAudio3DPoint(x: 0, y: 0, z: -3)
+                
+                audio.startTracking()
                 try? audio.engine.start()
-                // audio.playTone()
+                try? audio.player.playAudio()
                 print(String(audio.getPID(id: "com.spotify.client")))
                 audio.tccPermissionFire(pid: audio.getPID(id: "com.spotify.client"))
                 

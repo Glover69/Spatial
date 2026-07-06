@@ -8,6 +8,7 @@
 import AVFoundation
 import Combine
 import CoreMotion
+import AppKit
 
 
 
@@ -58,9 +59,15 @@ class AudioController: NSObject, ObservableObject {
             }
             
             // Safely unwrap
-            // guard let motion = m else { return }
+            guard let motion = m else { return }
             
-            // print("Yaw: \(motion.attitude.yaw), Pitch: \(motion.attitude.pitch), Roll: \(motion.attitude.roll)")
+            let yaw = motion.attitude.yaw * 180.0 / .pi
+            let pitch = motion.attitude.pitch * 180.0 / .pi
+            let roll = motion.attitude.roll * 180.0 / .pi
+            
+            self.env.listenerAngularOrientation = AVAudio3DAngularOrientation(
+                yaw: Float(yaw), pitch: Float(pitch), roll: Float(roll)
+            )
         }
     }
     
@@ -146,6 +153,7 @@ class AudioController: NSObject, ObservableObject {
     func tccPermissionFire(pid: pid_t) {
         let processObjectID = pidToProcessObject(pid: pid)
         let tapDesc = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
+        tapDesc.muteBehavior = .mutedWhenTapped
         var tapID: AudioObjectID = 0
         let c = AudioHardwareCreateProcessTap(tapDesc, &tapID)
         print("Tap creation status:", c)
@@ -173,15 +181,52 @@ class AudioController: NSObject, ObservableObject {
         var ioProcID: AudioDeviceIOProcID?
         
         AudioDeviceCreateIOProcID(aggregateDeviceID, { (inDevice, inNow, inInputData, inInputTime, outOutputData, inOutputTime, inClientData) in
+            let controller = Unmanaged<AudioController>.fromOpaque(inClientData!).takeUnretainedValue()
             let bufferList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
+
             for buffer in bufferList {
-                let samples = buffer.mData?.assumingMemoryBound(to: Float.self)
-                print(samples?[0] ?? 0)
+                let fc = buffer.mDataByteSize / 8
+                let sourceSamples = buffer.mData?.assumingMemoryBound(to: Float.self)
+
+                let bffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
+                bffer!.frameLength = fc
+
+                for i in 0..<Int(fc) {
+                    let left = sourceSamples![i*2]
+                    let right = sourceSamples![i*2 + 1]
+                    bffer!.floatChannelData![0][i] = (left + right) / 2
+                }
+                
+                
+
+                controller.player.scheduleBuffer(bffer!)
+                
             }
             return noErr
-        }, nil, &ioProcID)
+        }, Unmanaged.passUnretained(self).toOpaque(), &ioProcID)
         
         AudioDeviceStart(aggregateDeviceID, ioProcID)
+        print("Mono sample rate: ", monoF.sampleRate)
         
+        
+        var sampleRate: Float64 = 0
+           var propertySize = UInt32(MemoryLayout<Float64>.size)
+           
+           var propertyAddress = AudioObjectPropertyAddress(
+               mSelector: kAudioDevicePropertyNominalSampleRate,
+               mScope: kAudioObjectPropertyScopeGlobal,
+               mElement: kAudioObjectPropertyElementMain
+           )
+        
+        let _ = AudioObjectGetPropertyData(
+                aggregateDeviceID,
+                &propertyAddress,
+                0,
+                nil,
+                &propertySize,
+                &sampleRate
+            )
+        
+        print("Agg device Sample rate: ", sampleRate)
     }
 }
