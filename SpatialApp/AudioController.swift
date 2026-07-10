@@ -18,11 +18,20 @@ class AudioController: NSObject, ObservableObject {
     let player = AVAudioPlayerNode()
     let env = AVAudioEnvironmentNode()
     let mm = CMHeadphoneMotionManager()
+    let sideLeftPlayer = AVAudioPlayerNode()
+    let sideRightPlayer = AVAudioPlayerNode()
+    
+    let rearOnePlayer = AVAudioPlayerNode()
+    let rearTwoPlayer = AVAudioPlayerNode()
+    
+    let heightPlayer = AVAudioPlayerNode()
+
     
     let format: AVAudioFormat
     
     var displayLink: CADisplayLink?
     var startTime: CFTimeInterval = 0
+    var smoothedYaw: Float = 0
     
     let monoF: AVAudioFormat
     
@@ -32,6 +41,21 @@ class AudioController: NSObject, ObservableObject {
         engine.attach(env)
         player.renderingAlgorithm = .HRTF
         
+        engine.attach(sideLeftPlayer)
+        sideLeftPlayer.renderingAlgorithm = .HRTF
+        
+        engine.attach(sideRightPlayer)
+        sideRightPlayer.renderingAlgorithm = .HRTF
+        
+        engine.attach(rearOnePlayer)
+        rearOnePlayer.renderingAlgorithm = .HRTF
+        
+        engine.attach(rearTwoPlayer)
+        rearTwoPlayer.renderingAlgorithm = .HRTF
+        
+        engine.attach(heightPlayer)
+        heightPlayer.renderingAlgorithm = .HRTF
+        
         // Pulls the hardware's own output, so the nodes speak the same language (sample rate, channel count etc.)
         format = engine.outputNode.inputFormat(forBus: 0)
         monoF = AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1)!
@@ -40,6 +64,11 @@ class AudioController: NSObject, ObservableObject {
             // This wires player -> env -> output (hardware)
             try engine.connectNode(player, to: env, format: monoF)
             try engine.connectNode(env, to: engine.outputNode, format: format)
+            try engine.connectNode(sideLeftPlayer, to: env, format: monoF)
+            try engine.connectNode(sideRightPlayer, to: env, format: monoF)
+            try engine.connectNode(rearOnePlayer, to: env, format: monoF)
+            try engine.connectNode(rearTwoPlayer, to: env, format: monoF)
+            try engine.connectNode(heightPlayer, to: env, format: monoF)
         } catch {
             print("An error occurred: \(error.localizedDescription)")
         }
@@ -58,6 +87,7 @@ class AudioController: NSObject, ObservableObject {
                 return
             }
             
+            
             // Safely unwrap
             guard let motion = m else { return }
             
@@ -65,8 +95,11 @@ class AudioController: NSObject, ObservableObject {
             let pitch = motion.attitude.pitch * 180.0 / .pi
             let roll = motion.attitude.roll * 180.0 / .pi
             
+            let smoothedYaw = Double(self.smoothedYaw) * 0.9 + yaw * 1.0
+            self.smoothedYaw = Float(smoothedYaw)
+            
             self.env.listenerAngularOrientation = AVAudio3DAngularOrientation(
-                yaw: Float(yaw), pitch: Float(pitch), roll: Float(roll)
+                yaw: Float(-smoothedYaw), pitch: Float(pitch), roll: Float(roll)
             )
         }
     }
@@ -188,18 +221,48 @@ class AudioController: NSObject, ObservableObject {
                 let fc = buffer.mDataByteSize / 8
                 let sourceSamples = buffer.mData?.assumingMemoryBound(to: Float.self)
 
-                let bffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
-                bffer!.frameLength = fc
+                let midBuffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
+                let sideLeftBuffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
+                let sideRightBuffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
+                
+                let rearOneBuffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
+                let rearTwoBuffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
+                
+                let heightBuffer = AVAudioPCMBuffer(pcmFormat: controller.monoF, frameCapacity: fc)
+
+                
+                
+                midBuffer!.frameLength = fc
+                sideLeftBuffer!.frameLength = fc
+                sideRightBuffer!.frameLength = fc
+                rearOneBuffer!.frameLength = fc
+                rearTwoBuffer!.frameLength = fc
+                heightBuffer!.frameLength = fc
 
                 for i in 0..<Int(fc) {
                     let left = sourceSamples![i*2]
                     let right = sourceSamples![i*2 + 1]
-                    bffer!.floatChannelData![0][i] = (left + right) / 2
+                    
+                    let mid = (left + right) / 2 * 3.5
+                    let side = (left - right) / 2 * 3.5
+                    let rear = side - 0.7
+                    
+                    let h = mid - 0.5
+                    
+                    midBuffer!.floatChannelData![0][i] = mid
+                    sideLeftBuffer!.floatChannelData![0][i] = side
+                    sideRightBuffer!.floatChannelData![0][i] = -side
+                    rearOneBuffer!.floatChannelData![0][i] = rear
+                    rearTwoBuffer!.floatChannelData![0][i] = -rear
+                    heightBuffer!.floatChannelData![0][i] = h
                 }
                 
-                
-
-                controller.player.scheduleBuffer(bffer!)
+                controller.player.scheduleBuffer(midBuffer!)
+                controller.sideLeftPlayer.scheduleBuffer(sideLeftBuffer!)
+                controller.sideRightPlayer.scheduleBuffer(sideRightBuffer!)
+                controller.rearOnePlayer.scheduleBuffer(rearOneBuffer!)
+                controller.rearTwoPlayer.scheduleBuffer(rearTwoBuffer!)
+                controller.heightPlayer.scheduleBuffer(heightBuffer!)
                 
             }
             return noErr
